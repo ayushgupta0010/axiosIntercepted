@@ -7,17 +7,17 @@ const accessToken = localStorage.getItem("accessToken");
 const refreshToken = localStorage.getItem("refreshToken");
 
 const axiosIntercepted = axios.create({
-  baseURL: baseURL,
+  baseURL,
   timeout: 5000,
   headers: {
-    Authorization: accessToken ? "JWT " + accessToken : null,
+    Authorization: `JWT ${accessToken}`,
     "Content-Type": "application/json",
     accept: "application/json",
   },
 });
 
 axiosIntercepted.interceptors.response.use(
-  (response) => response,
+  (res) => res,
   (error) => {
     const originalRequest = error.config;
 
@@ -35,37 +35,34 @@ axiosIntercepted.interceptors.response.use(
       error.response.status === 401 &&
       error.response.statusText === "Unauthorized"
     ) {
-      if (refreshToken) {
-        const tokenParts = JSON.parse(atob(refreshToken.split(".")[1]));
-
-        // exp date in token is expressed in seconds, while now() returns milliseconds:
-        const now = Math.ceil(Date.now() / 1000);
-
-        if (tokenParts.exp > now) {
-          return axiosIntercepted
-            .post(refreshTokenURL, { refresh: refreshToken })
-            .then((response) => {
-              localStorage.setItem("accessToken", response.data.access);
-              localStorage.setItem("refreshToken", response.data.refresh);
-
-              axiosIntercepted.defaults.headers["Authorization"] =
-                "JWT " + response.data.access;
-              originalRequest.headers["Authorization"] =
-                "JWT " + response.data.access;
-
-              return axiosIntercepted(originalRequest);
-            })
-            .catch((err) => {
-              console.log(err);
-            });
-        } else {
-          console.log("Refresh token is expired", tokenParts.exp, now);
-          window.location.href = "/logout";
-        }
-      } else {
-        console.log("Refresh token not available.");
+      if (!refreshToken) {
         window.location.href = "/logout";
+        return Promise.reject(error);
       }
+
+      const tokenParts = JSON.parse(atob(refreshToken.split(".")[1]));
+
+      // exp date in token is expressed in seconds, while now() returns milliseconds:
+      const now = Math.ceil(Date.now() / 1000);
+
+      if (tokenParts.exp < now) {
+        window.location.href = "/logout";
+        return Promise.reject(error);
+      }
+
+      return axiosIntercepted
+        .post(refreshTokenURL, { refresh: refreshToken })
+        .then((res) => {
+          const access = res.data.access;
+          localStorage.setItem("accessToken", access);
+          localStorage.setItem("refreshToken", res.data.refresh);
+
+          originalRequest.headers["Authorization"] = `JWT ${access}`;
+          axiosIntercepted.defaults.headers["Authorization"] = `JWT ${access}`;
+
+          return axiosIntercepted(originalRequest);
+        })
+        .catch((err) => console.log(err));
     }
 
     // specific error handling done elsewhere
@@ -74,9 +71,7 @@ axiosIntercepted.interceptors.response.use(
 );
 
 axiosIntercepted.interceptors.request.use((config) => {
-  if (!config.url) {
-    return config;
-  }
+  if (!config.url) return config;
 
   const currentUrl = new URL(config.url, config.baseURL);
   // parse pathName to implement variables
@@ -86,6 +81,7 @@ axiosIntercepted.interceptors.request.use((config) => {
       encodeURIComponent(v)
     );
   });
+
   return {
     ...config,
     baseURL: `${currentUrl.protocol}//${currentUrl.host}`,
@@ -93,4 +89,4 @@ axiosIntercepted.interceptors.request.use((config) => {
   };
 });
 
-export default axiosIntercepted
+export default axiosIntercepted;
